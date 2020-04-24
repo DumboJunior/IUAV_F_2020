@@ -8,7 +8,7 @@ catkin_create_pkg track_object
 ```
 
 ``` bash
-cd cd track_object/src/
+cd track_object/src/
 mkdir dev_track_obj
 git clone https://github.com/DumboJunior/IUAV_F_2020.git
 ```

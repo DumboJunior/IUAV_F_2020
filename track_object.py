@@ -1,29 +1,34 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-track_obj
+Track_obj.py:
+
 """
-#################################
-# standard Imports		#
-#################################
-import numpy as np
+
+###############################################
+# Standard Imports                            #
+###############################################
 import time
 import threading
 from math import *
+import numpy as np
 
-#################################
-# ROS Import			#
-#################################
+###############################################
+# ROS Imports                                 #
+###############################################
 import rospy
 import rospkg
 
-#################################
-# ROS TOpic messages		#
-#################################
+###############################################
+# ROS Topic messages                          #
+###############################################
 from std_msgs.msg import String
 from geometry_msgs.msg import PoseStamped, TwistStamped
 
-#################################
-# ROS Service messages		#
-#################################
+###############################################
+# ROS Service messages                        #
+###############################################
 from mavros_msgs.srv import CommandBool, SetMode, CommandTOL
 from std_srvs.srv import Empty, EmptyRequest, EmptyResponse
 
@@ -31,5 +36,4 @@ from std_srvs.srv import Empty, EmptyRequest, EmptyResponse
 
 
 if __name__ == '__main__':
-	print("Hello World")
-
+    print("Hello World")

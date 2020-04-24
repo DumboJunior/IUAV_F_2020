@@ -14,6 +14,7 @@ git clone https://github.com/DumboJunior/IUAV_F_2020.git
 ```
 
 ``` bash
+cd ~/catkin_ws
 catkin build
 source devel/setup.bash
 

@@ -1,0 +1,3 @@
+#​ !/bin/sh
+
+sh /etc/init.d-posix/10016_iris

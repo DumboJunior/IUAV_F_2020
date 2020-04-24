@@ -10,6 +10,7 @@ catkin_create_pkg track_object std_msgs rospy roscpp
 ``` bash
 cd track_object/src/
 mkdir dev_track_obj
+cd dev_track_obj
 git clone https://github.com/DumboJunior/IUAV_F_2020.git
 ```
 

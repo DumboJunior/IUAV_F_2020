@@ -23,5 +23,5 @@ source devel/setup.bash
 
 ``` bash
 cd ~/catkin_ws
-rosrun Track_obj track_object.py
+rosrun track_object track_object.py
 ```

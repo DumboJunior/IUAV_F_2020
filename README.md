@@ -3,7 +3,7 @@
 ## setup
 
 ``` bash
-cd ~/catkin_ws
+cd ~/catkin_ws/src
 catkin_create_pkg track_object
 ```
 

@@ -4,7 +4,7 @@
 
 ``` bash
 cd ~/catkin_ws/src
-catkin_create_pkg track_object
+catkin_create_pkg track_object std_msgs rospy roscpp
 ```
 
 ``` bash

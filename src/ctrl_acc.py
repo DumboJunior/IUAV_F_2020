@@ -13,6 +13,9 @@ import time
 import threading
 from math import *
 import numpy as np
+import skfuzzy as fuzz
+from skfuzzy import control as ctrl
+import matplotlib.pyplot as plt
 
 ###############################################
 # ROS Imports                                 #
@@ -25,6 +28,7 @@ import rospkg
 ###############################################
 from std_msgs.msg import String
 from geometry_msgs.msg import PoseStamped, TwistStamped
+from mavros_msgs.msg import PositionTarget
 
 ###############################################
 # ROS Service messages                        #
@@ -78,14 +82,15 @@ class traj_grp1(object):
 
         # Circle param
         self.centerCirc = np.array([[0.0],[0.0]])
-        self.radius = 10.0
+        self.radius = 20.0
 
         # Regulation constants
         self.c_pos = 0.005
-        self.c_vel= 2.0
+        self.c_vel= 3.0
         self.c_acc = 1.25
 
-        self.s = 5.
+        self.s = 3.00
+        self.count = 0
         # 90 deg Rot_Matrix
         self.rotM = np.array([[0.0, -1.0],[1.0, 0.0]])
 
@@ -93,29 +98,77 @@ class traj_grp1(object):
 
         self.rate = rospy.Rate(20.0) # MUST be more then 2Hz
 
-        self.local_vel_pub = rospy.Publisher(self.rc.ns+"/mavros/setpoint_velocity/cmd_vel", TwistStamped, queue_size=10)
 
+        #self.local_vel_pub = rospy.Publisher(self.rc.ns+"/mavros/setpoint_velocity/cmd_vel", TwistStamped, queue_size=10)
+        self.local_pos_pub = rospy.Publisher(self.rc.ns+"/mavros/setpoint_raw/local", PositionTarget, queue_size=10)
+
+        '''
         # Init msgs
         self.target = TwistStamped()
         self.target.twist.linear.x = 0
         self.target.twist.linear.y = 0
         self.target.twist.linear.z = 0
+        self.target.twist.angular.z = 0
+        '''
+
+        self.pos_target = PositionTarget()
+        self.pos_target.velocity.x = 0
+        self.pos_target.velocity.y = 0
+        self.pos_target.velocity.z = 0
+        self.pos_target.position.z = 2
+        self.pos_target.yaw = 0
 
         ## Create services
         self.setpoint_controller_server()
 
         self.t_circle = threading.Thread(target=self.circle)
+        #self.t_plot = threading.Thread(target=self.plotVectors)
         self.t_circle.start()
-        print(">> Starting circle (Thread)")
+        #self.t_plot.start()
 
+        self.dist = ctrl.Antecedent(np.arange(0, 30, 1), 'dist')
+        self.change_in_r = ctrl.Consequent(np.arange(-5, 5, 1), 'change_in_r')
+
+        # Auto-membership function population is possible with .automf(3, 5, or 7)
+        self.dist.automf(3)
+
+        #fuzzy
+        self.change_in_r['low'] = fuzz.trimf(self.change_in_r.universe, [-5, -5, 0])
+        self.change_in_r['medium'] = fuzz.trimf(self.change_in_r.universe, [-5, 0, 5])
+        self.change_in_r['high'] = fuzz.trimf(self.change_in_r.universe, [0, 5, 5])
+        self.rule1 = ctrl.Rule(self.dist['poor'], self.change_in_r['high'] )
+        self.rule2 = ctrl.Rule(self.dist['average'], self.change_in_r['medium'])
+        self.rule3 = ctrl.Rule(self.dist['good'], self.change_in_r['low'])
+        self.tipping_ctrl = ctrl.ControlSystem([self.rule1, self.rule2, self.rule3])
+        self.tipping = ctrl.ControlSystemSimulation(self.tipping_ctrl)
+
+        # Custom membership functions can be built interactively with a familiar,
+        # Pythonic API
+        print(">> Starting circle (Thread)")
         rospy.spin()
 
-    """
-    State
-    * calc_err:
-    * update_grad_circle:
-    * update_U:
-    """
+    def fuzzy_calc(self):
+        self.count += 1
+        print(self.count)
+        if self.count == 1000 :
+            self.radius += 20
+            self.count = 0
+
+
+        if self.err > 10:
+            self.s = 0
+        else :
+            self.s = 10.0
+
+        '''
+        if abs(self.err) < 10 :
+            self.tipping.input['dist']= (sqrt(self.rc.pos[0][0]**2 +self.rc.pos[1][0]**2)) - 20
+            self.tipping.compute()
+            val =  self.tipping.output['change_in_r']
+            self.radius += val
+            print(self.radius)
+        '''
+
     def calc_err(self):
         self.err = (self.rc.pos[0][0]-self.centerCirc[0][0])**2 + (self.rc.pos[1][0]-self.centerCirc[1][0])**2 -self.radius**2
 
@@ -168,26 +221,38 @@ class traj_grp1(object):
         self.set_state("CIRCLE")
 
         while self.state == "CIRCLE":
-            self.target.header.frame_id = "base_footprint"
-            self.target.header.stamp = rospy.Time.now()
+            self.pos_target.header.frame_id = "base_footprint"
+            self.pos_target.header.stamp = rospy.Time.now()
+
 
             self.calc_err()
             self.update_grad_circle()
             self.update_U()
 
-            print(self.Ugvf)
-            self.target.twist.linear.x = self.Ugvf[0][0] * 0.5
-            self.target.twist.linear.y = self.Ugvf[1][0] * 0.5
+            #print(self.Ugvf)
+            self.pos_target.velocity.x = self.Ugvf[0][0] * 0.5
+            self.pos_target.velocity.y = self.Ugvf[1][0] * 0.5
+            v = (self.rc.pos[:2] - self.centerCirc)
+            angle = atan2(v[1][0],v[0][0])
+            if angle > pi :
+                angle = -pi + (angle - pi)
+            self.pos_target.yaw  = angle + pi
 
-            self.local_vel_pub.publish(self.target)
+
+
+            #self.fuzzy_calc()
+            #self.local_vel_pub.publish(self.target)
+            self.local_pos_pub.publish(self.pos_target)
             self.rate.sleep()
 
+        '''
         print(">> Cicle has stopped")
         self.target.twist.linear.x = 0
         self.target.twist.linear.y = 0
         self.target.twist.linear.z = 0
 
         self.local_vel_pub.publish(self.target)
+        '''
 
     """
     Stop

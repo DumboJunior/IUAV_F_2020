@@ -13,9 +13,9 @@ import time
 import threading
 from math import *
 import numpy as np
-import skfuzzy as fuzz
-from skfuzzy import control as ctrl
-import matplotlib.pyplot as plt
+#import skfuzzy as fuzz
+#from skfuzzy import control as ctrl
+#import matplotlib.pyplot as plt
 
 ###############################################
 # ROS Imports                                 #
@@ -36,6 +36,11 @@ from mavros_msgs.msg import PositionTarget
 from mavros_msgs.srv import CommandBool, SetMode, CommandTOL
 from std_srvs.srv import Empty, EmptyRequest, EmptyResponse
 
+##############################################
+# std import
+##
+from Lidar_plugin import Lidar_plugin
+
 class rotocraft(object):
     def __init__(self):
         self.pos = np.array([[0.0],[0.0],[0.0]])
@@ -48,11 +53,14 @@ class rotocraft(object):
         self.error_vel = np.array([[0],[0],[0]])
 
         self.ns = ""
+        self.lidar = Lidar_plugin(self.ns)
 
         self.U = np.array([[0],[0],[0]])    # Accelerations
 
         rospy.Subscriber(self.ns+"/mavros/local_position/velocity_local", TwistStamped, self.cb_vel)
         rospy.Subscriber(self.ns+"/mavros/local_position/pose", PoseStamped, self.cb_pos)
+
+        self.yaw = 0
 
     """
     Callbacks
@@ -118,6 +126,7 @@ class traj_grp1(object):
         self.pos_target.position.z = 2
         self.pos_target.yaw = 0
 
+
         ## Create services
         self.setpoint_controller_server()
 
@@ -125,7 +134,7 @@ class traj_grp1(object):
         #self.t_plot = threading.Thread(target=self.plotVectors)
         self.t_circle.start()
         #self.t_plot.start()
-
+        """
         self.dist = ctrl.Antecedent(np.arange(0, 30, 1), 'dist')
         self.change_in_r = ctrl.Consequent(np.arange(-5, 5, 1), 'change_in_r')
 
@@ -141,6 +150,7 @@ class traj_grp1(object):
         self.rule3 = ctrl.Rule(self.dist['good'], self.change_in_r['low'])
         self.tipping_ctrl = ctrl.ControlSystem([self.rule1, self.rule2, self.rule3])
         self.tipping = ctrl.ControlSystemSimulation(self.tipping_ctrl)
+        """
 
         # Custom membership functions can be built interactively with a familiar,
         # Pythonic API
@@ -148,26 +158,14 @@ class traj_grp1(object):
         rospy.spin()
 
     def fuzzy_calc(self):
-        self.count += 1
-        print(self.count)
-        if self.count == 1000 :
-            self.radius += 20
-            self.count = 0
+        if self.rc.lidar.get_minDist() < 25:
+           _yaw = self.rc.yaw
+           if self.rc.yaw < 0:
+              _yaw = self.rc.yaw + 2*pi
+           self.centerCirc[0][0] = self.rc.pos[0][0] + cos((_yaw-self.rc.lidar.get_minRange_angles()[0]))*self.rc.lidar.get_minDist()
+           self.centerCirc[1][0] = self.rc.pos[1][0] + sin((_yaw-self.rc.lidar.get_minRange_angles()[0]))*self.rc.lidar.get_minDist()
+           print("lidar dist:\t"+ str(self.rc.lidar.get_minDist()))
 
-
-        if self.err > 10:
-            self.s = 0
-        else :
-            self.s = 10.0
-
-        '''
-        if abs(self.err) < 10 :
-            self.tipping.input['dist']= (sqrt(self.rc.pos[0][0]**2 +self.rc.pos[1][0]**2)) - 20
-            self.tipping.compute()
-            val =  self.tipping.output['change_in_r']
-            self.radius += val
-            print(self.radius)
-        '''
 
     def calc_err(self):
         self.err = (self.rc.pos[0][0]-self.centerCirc[0][0])**2 + (self.rc.pos[1][0]-self.centerCirc[1][0])**2 -self.radius**2
@@ -229,7 +227,7 @@ class traj_grp1(object):
             self.update_grad_circle()
             self.update_U()
 
-            #print(self.Ugvf)
+            print("self.Ugvf")
             self.pos_target.velocity.x = self.Ugvf[0][0] * 0.5
             self.pos_target.velocity.y = self.Ugvf[1][0] * 0.5
             v = (self.rc.pos[:2] - self.centerCirc)
@@ -237,10 +235,12 @@ class traj_grp1(object):
             if angle > pi :
                 angle = -pi + (angle - pi)
             self.pos_target.yaw  = angle + pi
+			# positioning
+            self.rc.yaw = angle + pi
 
 
 
-            #self.fuzzy_calc()
+            self.fuzzy_calc()
             #self.local_vel_pub.publish(self.target)
             self.local_pos_pub.publish(self.pos_target)
             self.rate.sleep()

@@ -60,7 +60,10 @@ class rotocraft(object):
         rospy.Subscriber(self.ns+"/mavros/local_position/velocity_local", TwistStamped, self.cb_vel)
         rospy.Subscriber(self.ns+"/mavros/local_position/pose", PoseStamped, self.cb_pos)
 
-        self.yaw = 0
+        self.yaw = 0.
+        self.tooclose = 0
+        self.roll = 0.
+        self.pitch = 0.
 
     """
     Callbacks
@@ -76,10 +79,33 @@ class rotocraft(object):
         self.pos[0][0] = data.pose.position.x
         self.pos[1][0] = data.pose.position.y
         self.pos[2][0] = data.pose.position.z
+        x = data.pose.orientation.x
+        y = data.pose.orientation.y
+        z = data.pose.orientation.z
+        w = data.pose.orientation.w
+
+        ysqr = y * y
+
+        t0 = +2.0 * (w * x + y * z)
+        t1 = +1.0 - 2.0 * (x * x + ysqr)
+        roll = np.arctan2(t0, t1)
+
+        t2 = +2.0 * (w * y - z * x)
+        t2 = np.where(t2>+1.0, +1.0, t2)
+        #t2 = +1.0 if t2 > +1.0 else t2
+
+        t2 = np.where(t2<-1.0, -1.0, t2)
+        #t2 = -1.0 if t2 < -1.0 else t2
+        pitch = np.arcsin(t2)
+
+        self.roll = roll
+        self.pitch = pitch
+
 
 class traj_grp1(object):
     def __init__(self):
         rospy.init_node('listener', anonymous=True)
+        self.file = open("centerCircPos.txt","w+")
 
         self.err = 0.0
         self.grad = np.array([[0.0],[0.0]])
@@ -89,8 +115,8 @@ class traj_grp1(object):
         self.Ugvf = np.array([[0.0],[0.0],[15.0]])
 
         # Circle param
-        self.centerCirc = np.array([[0.0],[0.0]])
-        self.radius = 20.0
+        self.centerCirc = np.array([[1.0],[5.0]])
+        self.radius = 15.0
 
         # Regulation constants
         self.c_pos = 0.005
@@ -106,26 +132,12 @@ class traj_grp1(object):
 
         self.rate = rospy.Rate(20.0) # MUST be more then 2Hz
 
-
-        #self.local_vel_pub = rospy.Publisher(self.rc.ns+"/mavros/setpoint_velocity/cmd_vel", TwistStamped, queue_size=10)
         self.local_pos_pub = rospy.Publisher(self.rc.ns+"/mavros/setpoint_raw/local", PositionTarget, queue_size=10)
 
-        '''
-        # Init msgs
-        self.target = TwistStamped()
-        self.target.twist.linear.x = 0
-        self.target.twist.linear.y = 0
-        self.target.twist.linear.z = 0
-        self.target.twist.angular.z = 0
-        '''
-
         self.pos_target = PositionTarget()
-        self.pos_target.velocity.x = 0
-        self.pos_target.velocity.y = 0
-        self.pos_target.velocity.z = 0
-        self.pos_target.position.z = 2
-        self.pos_target.yaw = 0
-
+        self.pos_target.coordinate_frame = 1
+        # Ignore flags for pos and vel
+        self.pos_target.type_mask =  1 + 2 + 8 + 16 + 32 + 2048
 
         ## Create services
         self.setpoint_controller_server()
@@ -157,15 +169,18 @@ class traj_grp1(object):
         print(">> Starting circle (Thread)")
         rospy.spin()
 
-    def fuzzy_calc(self):
-        if self.rc.lidar.get_minDist() < 25:
-           _yaw = self.rc.yaw
-           if self.rc.yaw < 0:
-              _yaw = self.rc.yaw + 2*pi
-           self.centerCirc[0][0] = self.rc.pos[0][0] + cos((_yaw-self.rc.lidar.get_minRange_angles()[0]))*self.rc.lidar.get_minDist()
-           self.centerCirc[1][0] = self.rc.pos[1][0] + sin((_yaw-self.rc.lidar.get_minRange_angles()[0]))*self.rc.lidar.get_minDist()
-           print("lidar dist:\t"+ str(self.rc.lidar.get_minDist()))
-
+    def avoidance(self):
+       if abs(self.rc.roll) < 0.09 and abs(self.rc.pitch) < 0.06:
+           if self.rc.lidar.get_minDist() < 10 and self.rc.tooclose == 0:
+               _yaw = self.rc.yaw
+               self.centerCirc[0][0] = self.rc.pos[0][0] + cos((_yaw+self.rc.lidar.get_minRange_angles()[0]))*self.rc.lidar.get_minDist()
+               self.centerCirc[1][0] = self.rc.pos[1][0] + sin((_yaw+self.rc.lidar.get_minRange_angles()[0]))*self.rc.lidar.get_minDist()
+               self.file.write("["+str(self.centerCirc[0][0])+", "+str(self.centerCirc[1][0])+"] \n")
+               self.s = 0
+               self.rc.tooclose = 1
+           elif self.rc.lidar.get_minDist() > 11:
+                self.s = 3
+                self.rc.tooclose = 0
 
     def calc_err(self):
         self.err = (self.rc.pos[0][0]-self.centerCirc[0][0])**2 + (self.rc.pos[1][0]-self.centerCirc[1][0])**2 -self.radius**2
@@ -222,26 +237,24 @@ class traj_grp1(object):
             self.pos_target.header.frame_id = "base_footprint"
             self.pos_target.header.stamp = rospy.Time.now()
 
-
             self.calc_err()
             self.update_grad_circle()
             self.update_U()
-
-            print("self.Ugvf")
-            self.pos_target.velocity.x = self.Ugvf[0][0] * 0.5
-            self.pos_target.velocity.y = self.Ugvf[1][0] * 0.5
+            #print("roll")
+            #print(self.rc.roll)
+            #print("pitch")
+            #print(self.rc.pitch)
+            self.pos_target.acceleration_or_force.x = self.Ugvf[0][0] * 0.5
+            self.pos_target.acceleration_or_force.y = self.Ugvf[1][0] * 0.5
+            self.pos_target.position.z = 10
             v = (self.rc.pos[:2] - self.centerCirc)
             angle = atan2(v[1][0],v[0][0])
             if angle > pi :
                 angle = -pi + (angle - pi)
             self.pos_target.yaw  = angle + pi
-			# positioning
             self.rc.yaw = angle + pi
+            self.avoidance()
 
-
-
-            self.fuzzy_calc()
-            #self.local_vel_pub.publish(self.target)
             self.local_pos_pub.publish(self.pos_target)
             self.rate.sleep()
 

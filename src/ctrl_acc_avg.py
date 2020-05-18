@@ -102,11 +102,10 @@ class rotocraft(object):
         self.roll = roll
         self.pitch = pitch
 
-
 class traj_grp1(object):
     def __init__(self):
         rospy.init_node('listener', anonymous=True)
-        #self.circPosCap = open("circPosCap.txt","w+")
+        self.counture_points = []
         self.rcpos_X=[]
         self.rcpos_Y=[]
         self.circPos_X=[]
@@ -124,7 +123,7 @@ class traj_grp1(object):
         self.radius = 15.0
 
         # Regulation constants
-        self.c_pos = 0.005
+        self.c_pos = 0.005#/self.radius
         self.c_vel= 3.0
         self.c_acc = 1.25
 
@@ -144,7 +143,16 @@ class traj_grp1(object):
         # Ignore flags for pos and vel
         self.pos_target.type_mask =  1 + 2 + 8 + 16 + 32 + 2048
 
-        ## Create services
+        self.const_vel = PositionTarget()
+        self.const_vel.coordinate_frame = 1
+        # Ignore flags for pos and vel
+        self.const_vel.type_mask = 1 + 2 + 64 + 128 + 256 + 2048
+        self.const_vel.velocity.x = 1
+        self.const_vel.velocity.y = 1
+        self.const_vel.position.z = 10
+        self.const_vel.yaw=pi/4.
+
+		## Create services
         self.setpoint_controller_server()
 
         self.t_circle = threading.Thread(target=self.circle)
@@ -174,20 +182,73 @@ class traj_grp1(object):
         print(">> Starting circle (Thread)")
         rospy.spin()
 
+    def calculateDistance(self, point1 ,point2):
+        dist = sqrt((point1[0] - point2[0] )**2 + (point1[1] -point2[1] )**2)
+        return dist
+
+    def averagePoint(self, points):
+        average = [sum(x)/len(x) for x in zip(*points)]
+        return average
+
+
+    def furthestPointDist(self, points, center):
+        max_dist = 0
+        for point in points:
+            new_point_dist = self.calculateDistance(point, center)
+
+            if new_point_dist > max_dist :
+                max_dist = new_point_dist
+        return max_dist
+
     def avoidance(self):
-       if abs(self.rc.roll) < 0.09 and abs(self.rc.pitch) < 0.06:
-           if self.rc.lidar.get_minDist() < 10 and self.rc.tooclose == 0:
-               _yaw = self.rc.yaw
-               self.centerCirc[0][0] = self.rc.pos[0][0] + cos((_yaw+self.rc.lidar.get_minRange_angles()[0]))*self.rc.lidar.get_minDist()
-               self.centerCirc[1][0] = self.rc.pos[1][0] + sin((_yaw+self.rc.lidar.get_minRange_angles()[0]))*self.rc.lidar.get_minDist()
-               self.s = 0
-               self.rc.tooclose = 1
-           elif self.rc.lidar.get_minDist() > 11:
-                self.s = 3
-                self.rc.tooclose = 0
+        minDist = self.rc.lidar.get_minDist()
+        angle = self.rc.lidar.get_minRange_angles()[0]
+        if abs(self.rc.roll) < 0.2 and abs(self.rc.pitch) < 0.2 and minDist < 9. and self.rc.tooclose == 0:
+            _yaw = self.rc.yaw
+            x = self.rc.pos[0][0] + cos((_yaw + angle))*minDist
+            y = self.rc.pos[1][0] + sin((_yaw + angle))*minDist
+            print("angles:!\t",_yaw,angle)
+            if x != 0.0 and y != 0.0:
+                self.counture_points.append([x,y])
+                average_point = self.averagePoint(self.counture_points)
+                self.centerCirc[0][0] = average_point[0]
+                self.centerCirc[1][0] = average_point[1]
+                self.radius = self.furthestPointDist(self.counture_points, average_point) + 10.
+                self.s = 0
+                self.rc.tooclose = 1
+                print("RC pos:")
+                print(str(self.rc.pos))
+                print("minDist:")
+                print(str(minDist))
+                print('radius:')
+                print(self.radius)
+                print('center:')
+                print(self.centerCirc)
+                print('points:')
+                print(self.counture_points)
+                print("Error:")
+                print(str(self.err))
+        elif abs(self.err) < 10.0 and self.rc.tooclose == 1: #self.rc.lidar.get_minDist() > 9.5 and self.rc.tooclose == 1:
+            print('reset')
+            self.s = 3
+            self.rc.tooclose = 0
+        else:
+            print('Else radius:')
+            print(self.radius)
+            print('Else center:')
+            print(self.centerCirc)
+            print('Else points:')
+            print(self.counture_points)
+            print("ELSE ERROR:")
+            print(str(self.err))
+            print("RC pos:")
+            print(str(self.rc.pos))
+            print("minDist:")
+            print(str(minDist))
+
 
     def calc_err(self):
-        self.err = (self.rc.pos[0][0]-self.centerCirc[0][0])**2 + (self.rc.pos[1][0]-self.centerCirc[1][0])**2 -self.radius**2
+        self.err = (self.rc.pos[0][0]-self.centerCirc[0][0])**2 + (self.rc.pos[1][0]-self.centerCirc[1][0])**2 - self.radius**2
 
     def update_grad_circle(self):
         self.grad = 2.0*(self.rc.pos[0:2]-self.centerCirc[0:2])
@@ -236,7 +297,6 @@ class traj_grp1(object):
 
     def circle(self):
         self.set_state("CIRCLE")
-        i = 0
 
         while self.state == "CIRCLE":
             self.pos_target.header.frame_id = "base_footprint"
@@ -249,31 +309,33 @@ class traj_grp1(object):
             #print(self.rc.roll)
             #print("pitch")
             #print(self.rc.pitch)
-            if i >=5:
-                #self.circPosCap.write("("+str(self.centerCirc[0][0])+", "+str(self.centerCirc[1][0])+")\n")
-                #self.rcPosCap.write(""+str(self.rc.pos[0][0])+ " "+ str(self.rc.pos[1][0])+ " " + str(2*cos(self.rc.yaw))+" "+ str(2*sin(self.rc.yaw)) +"\n")
-                self.rcpos_X.append(self.rc.pos[0][0])
-                self.rcpos_Y.append(self.rc.pos[1][0])
-                self.circPos_X.append(self.centerCirc[0][0])
-                self.circPos_Y.append(self.centerCirc[1][0])
-                i = 0
-            i +=1
             self.pos_target.acceleration_or_force.x = self.Ugvf[0][0] * 0.5
             self.pos_target.acceleration_or_force.y = self.Ugvf[1][0] * 0.5
             self.pos_target.position.z = 10
+            self.rcpos_X.append(self.rc.pos[0][0])
+            self.rcpos_Y.append(self.rc.pos[1][0])
+            self.circPos_X.append(self.centerCirc[0][0])
+            self.circPos_Y.append(self.centerCirc[1][0])
+
             v = (self.rc.pos[:2] - self.centerCirc)
             angle = atan2(v[1][0],v[0][0])
             if angle > pi :
                 angle = -pi + (angle - pi)
             self.pos_target.yaw  = angle + pi
-            self.rc.yaw = angle + pi
+            if len(self.counture_points)<=0:
+                self.rc.yaw = angle
+            else:
+                self.rc.yaw = angle + pi
             self.avoidance()
 
-            self.local_pos_pub.publish(self.pos_target)
+            if len(self.counture_points) <= 0:
+                self.local_pos_pub.publish(self.const_vel)
+            else:
+                self.local_pos_pub.publish(self.pos_target)
             self.rate.sleep()
 
             rcPosCap = pandas.DataFrame(data={"x":self.rcpos_X, "y":self.rcpos_Y, "circ_x":self.circPos_X, "circ_y":self.circPos_Y})
-            rcPosCap.to_csv("RC_test.csv",sep=",",index=False)
+            rcPosCap.to_csv("RC_avg_test.csv",sep=",",index=False)
 
         '''
         print(">> Cicle has stopped")

@@ -35,5 +35,7 @@ class Lidar_plugin(object):
 		return min_dist_angles
 
 	def get_minDist(self):
-		return np.amin(self.lidar_ranges)
-
+		if np.amin(self.lidar_ranges)>0.40:
+			return np.amin(self.lidar_ranges)
+		else:
+			return 30.0

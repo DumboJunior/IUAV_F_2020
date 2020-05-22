@@ -117,7 +117,7 @@ class traj_grp1(object):
         self.Ugvf = np.array([[0.0],[0.0],[15.0]])
 
         # Circle param
-        self.centerCirc = np.array([[1.0],[5.0]])
+        self.centerCirc = np.array([[20.0],[25.0]])
         self.radius = 15.0
         self.counture_points = []
 
@@ -126,7 +126,7 @@ class traj_grp1(object):
         self.c_vel= 3.0
         self.c_acc = 1.25
 
-        self.s = 3.00
+        self.s = 1.00
         self.count = 0
         # 90 deg Rot_Matrix
         self.rotM = np.array([[0.0, -1.0],[1.0, 0.0]])

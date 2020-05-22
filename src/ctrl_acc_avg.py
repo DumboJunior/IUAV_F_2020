@@ -297,8 +297,10 @@ class traj_grp1(object):
 
     def circle(self):
         self.set_state("CIRCLE")
+        i = 0
 
         while self.state == "CIRCLE":
+            i+=1
             self.pos_target.header.frame_id = "base_footprint"
             self.pos_target.header.stamp = rospy.Time.now()
 
@@ -312,10 +314,6 @@ class traj_grp1(object):
             self.pos_target.acceleration_or_force.x = self.Ugvf[0][0] * 0.5
             self.pos_target.acceleration_or_force.y = self.Ugvf[1][0] * 0.5
             self.pos_target.position.z = 10
-            self.rcpos_X.append(self.rc.pos[0][0])
-            self.rcpos_Y.append(self.rc.pos[1][0])
-            self.circPos_X.append(self.centerCirc[0][0])
-            self.circPos_Y.append(self.centerCirc[1][0])
 
             v = (self.rc.pos[:2] - self.centerCirc)
             angle = atan2(v[1][0],v[0][0])
@@ -334,8 +332,15 @@ class traj_grp1(object):
                 self.local_pos_pub.publish(self.pos_target)
             self.rate.sleep()
 
-            rcPosCap = pandas.DataFrame(data={"x":self.rcpos_X, "y":self.rcpos_Y, "circ_x":self.circPos_X, "circ_y":self.circPos_Y})
-            rcPosCap.to_csv("RC_avg_test.csv",sep=",",index=False)
+            if i > 20:
+                self.rcpos_X.append(self.rc.pos[0][0])
+                self.rcpos_Y.append(self.rc.pos[1][0])
+                self.circPos_X.append(self.centerCirc[0][0])
+                self.circPos_Y.append(self.centerCirc[1][0])
+
+                rcPosCap = pandas.DataFrame(data={"x":self.rcpos_X, "y":self.rcpos_Y, "circ_x":self.circPos_X, "circ_y":self.circPos_Y})
+                rcPosCap.to_csv("RC_avg_test.csv",sep=",",index=False)
+                i=0
 
         '''
         print(">> Cicle has stopped")
